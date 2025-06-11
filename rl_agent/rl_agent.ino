@@ -191,36 +191,42 @@ public:
     delay(1000);
   }
 
-  void moveServoDown(int toAngle, int stepDelay = 10) {
-    if (servoDownAngle < toAngle) {
-      for (int angle = servoDownAngle; angle <= toAngle; angle += 2) {
-        servoDown.write(angle);
-        delay(stepDelay);
+  void moveServos(int targetDown, int targetUp, int stepDelay = 7, int stepSize = 2) {
+    targetDown = constrain(targetDown, 0, 90);
+    targetUp = constrain(targetUp, 0, 180);
+
+    int deltaDown = targetDown - servoDownAngle;
+    int deltaUp = targetUp - servoUpAngle;
+
+    int stepsDown = abs(deltaDown) / stepSize;
+    int stepsUp = abs(deltaUp) / stepSize;
+    int totalSteps = max(stepsDown, stepsUp);
+
+    bool downDone = false;
+    bool upDone = false;
+
+    for (int i = 1; i <= totalSteps; i++) {
+      if (i <= stepsDown) {
+        int newDown = servoDownAngle + (deltaDown > 0 ? i * stepSize : -i * stepSize);
+        servoDown.write(constrain(newDown, 0, 90));
+      } else if (!downDone) {
+        servoDown.write(targetDown);
+        downDone = true;
       }
-    } else {
-      for (int angle = servoDownAngle; angle >= toAngle; angle -= 2) {
-        servoDown.write(angle);
-        delay(stepDelay);
+
+      if (i <= stepsUp) {
+        int newUp = servoUpAngle + (deltaUp > 0 ? i * stepSize : -i * stepSize);
+        servoUp.write(constrain(newUp, 0, 180));
+      } else if (!upDone) {
+        servoUp.write(targetUp);
+        upDone = true;
       }
+
+      delay(stepDelay);
     }
 
-    servoDownAngle = toAngle;
-  }
-
-  void moveServoUp(int toAngle, int stepDelay = 10) {
-    if (servoUpAngle < toAngle) {
-      for (int angle = servoUpAngle; angle <= toAngle; angle += 2) {
-        servoUp.write(angle);
-        delay(stepDelay);
-      }
-    } else {
-      for (int angle = servoUpAngle; angle >= toAngle; angle -= 2) {
-        servoUp.write(angle);
-        delay(stepDelay);
-      }
-    }
-
-    servoUpAngle = toAngle;
+    servoDownAngle = targetDown;
+    servoUpAngle = targetUp;
   }
 
   void healthCheck() {
@@ -232,13 +238,11 @@ public:
     printDistance(dist);
 
     // 3. Move servos to check
-    moveServoDown(90);
-    moveServoUp(90);
+    moveServos(90, 90);
     delay(1000);
 
     // 4. Move servos back to initial position
-    moveServoDown(0);
-    moveServoUp(180);
+    moveServos(0, 180);
     printOnLCD("Servos Reset");
 
     // 5. Print completion message
