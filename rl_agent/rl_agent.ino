@@ -39,8 +39,8 @@ private:
   LiquidCrystal_I2C lcd;
 
   const int SERVO_DOWN_MIN_ANGLE = 0;
-  const int SERVO_DOWN_MAX_ANGLE = 90;
-  const int SERVO_UP_MIN_ANGLE = 0;
+  const int SERVO_DOWN_MAX_ANGLE = 80;
+  const int SERVO_UP_MIN_ANGLE = 10;
   const int SERVO_UP_MAX_ANGLE = 180;
 
   int servoDownAngle;
@@ -64,15 +64,15 @@ private:
     vector<float>(NUM_ACTIONS)
   };
 
-  float alpha = 0.1;
+  float alpha = 0.2;
   float gamma = 0.9;
-  float beta = 0.05;
+  float beta = - 0.03;
   float epsilon_prob = 1;
-  float epsilon_prob_decay = 0.985;
+  float epsilon_prob_decay = 0.93;
   float min_epsilon_prob = 0.1;
 
-  int learning_cycles = 30;
-  int steps_per_cycle = 200;
+  int learning_cycles = 40;
+  int steps_per_cycle = 100;
 
 public:
   // Dynamic network and OTA identifiers
@@ -339,7 +339,7 @@ public:
     delay(1000);
   }
 
-  void moveServos(int targetDown, int targetUp, int stepDelay = 7, int stepSize = 2) {
+  void moveServos(int targetDown, int targetUp, int stepDelay = 10, int stepSize = 2) {
     targetDown = constrain(targetDown, 0, 90);
     targetUp = constrain(targetUp, 0, 180);
 
