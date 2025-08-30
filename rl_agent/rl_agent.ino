@@ -55,23 +55,20 @@ private:
   const int NUM_STATES_UP = (SERVO_UP_MAX_ANGLE - SERVO_UP_MIN_ANGLE) / ANGLE_STEP + 1;
   const int TOTAL_STATES = NUM_STATES_DOWN * NUM_STATES_UP;
 
-  const int NUM_ACTION_STEPS = 7;
-  const int ACTION_MULTIPLIERS[7] = { -3, -2, -1, 0, 1, 2, 3 };
+  const int NUM_ACTION_STEPS = 5;
+  const int ACTION_MULTIPLIERS[5] = { -4, -3, 0, 3, 4 };
   const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS;
 
-  vector<vector<float>> qTable{
-    TOTAL_STATES,
-    vector<float>(NUM_ACTIONS)
-  };
+  vector<vector<float>> qTable{ TOTAL_STATES, vector<float>(NUM_ACTIONS, 0.0) };
 
-  float alpha = 0.2;
+  float alpha = 0.4;
   float gamma = 0.9;
-  float beta = - 0.03;
+  float beta = -0.06;
   float epsilon_prob = 1;
-  float epsilon_prob_decay = 0.93;
-  float min_epsilon_prob = 0.1;
+  float epsilon_prob_decay = 0.965;
+  float min_epsilon_prob = 0.2;
 
-  int learning_cycles = 40;
+  int learning_cycles = 50;
   int steps_per_cycle = 100;
 
 public:
@@ -185,7 +182,7 @@ public:
       lcd.print("Total Reward: ");
       lcd.print(total_reward);
       Serial.printf("Total Reward: %.2f\n", c + 1, total_reward);
-      delay(1000);
+      delay(3000);
     }
 
     printOnLCD("Training Complete!");
@@ -340,8 +337,8 @@ public:
   }
 
   void moveServos(int targetDown, int targetUp, int stepDelay = 10, int stepSize = 2) {
-    targetDown = constrain(targetDown, 0, 90);
-    targetUp = constrain(targetUp, 0, 180);
+    targetDown = constrain(targetDown, SERVO_DOWN_MIN_ANGLE, SERVO_DOWN_MAX_ANGLE);
+    targetUp = constrain(targetUp, SERVO_UP_MIN_ANGLE, SERVO_UP_MAX_ANGLE);
 
     int deltaDown = targetDown - servoDownAngle;
     int deltaUp = targetUp - servoUpAngle;
@@ -440,6 +437,7 @@ void setup() {
 }
 
 void loop() {
+  vTaskDelay(1);
   robot.doTraining();
   robot.doLearnedBehavior();
 }
