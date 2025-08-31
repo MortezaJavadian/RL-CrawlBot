@@ -49,13 +49,13 @@ private:
   int currentDistance;
 
   // Agent
-  const int ANGLE_STEP = 10;
+  const int ANGLE_STEP = 20;
 
   const int NUM_STATES_DOWN = (SERVO_DOWN_MAX_ANGLE - SERVO_DOWN_MIN_ANGLE) / ANGLE_STEP + 1;
   const int NUM_STATES_UP = (SERVO_UP_MAX_ANGLE - SERVO_UP_MIN_ANGLE) / ANGLE_STEP + 1;
   const int TOTAL_STATES = NUM_STATES_DOWN * NUM_STATES_UP;
 
-  const int NUM_ACTION_STEPS = 5;
+  const int NUM_ACTION_STEPS = 3;
   const int ACTION_MULTIPLIERS[5] = { -4, -3, 0, 3, 4 };
   const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS;
 
@@ -150,6 +150,7 @@ public:
 
         int action = chooseAction(currentState_idx);
         takeAction(action);
+        delay(100);
 
         int final_dist = getDistance();
         if (final_dist < 0)
@@ -308,14 +309,32 @@ public:
   }
 
   int getDistance() {
-    int distance = sonar.ping_cm();  // Get distance in cm
+    const int num_readings = 5;
+    int readings[num_readings];
+    long total = 0;
 
-    if (distance == 0) {
-      Serial.println("Warning: No echo received from SRF module.");
-      return -1;
+    for (int i = 0; i < num_readings; i++) {
+      readings[i] = sonar.ping_cm();
+      delay(20); // Small delay between pings
     }
 
-    Serial.print("Distance: ");
+    // Simple average, ignoring errors (0)
+    int count = 0;
+    for (int i = 0; i < num_readings; i++) {
+      if (readings[i] > 0) {
+        total += readings[i];
+        count++;
+      }
+    }
+
+    if (count == 0) {
+      Serial.println("Warning: No echo received from SRF module.");
+      return -1; [cite: 59]
+    }
+
+    int distance = total / count;
+
+    Serial.print("Avg Distance: ");
     Serial.print(distance);
     Serial.println(" cm");
 
