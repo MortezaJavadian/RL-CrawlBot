@@ -308,6 +308,21 @@ public:
     delay(2000);
   }
 
+  // int getDistance() {
+  //   int distance = sonar.ping_cm();  // Get distance in cm
+
+  //   if (distance == 0) {
+  //     Serial.println("Warning: No echo received from SRF module.");
+  //     return -1;
+  //   }
+
+  //   Serial.print("Distance: ");
+  //   Serial.print(distance);
+  //   Serial.println(" cm");
+
+  //   return distance;
+  // }
+  // Modify the getDistance() function
   int getDistance() {
     const int num_readings = 5;
     int readings[num_readings];
@@ -329,7 +344,7 @@ public:
 
     if (count == 0) {
       Serial.println("Warning: No echo received from SRF module.");
-      return -1; [cite: 59]
+      return -1;
     }
 
     int distance = total / count;
