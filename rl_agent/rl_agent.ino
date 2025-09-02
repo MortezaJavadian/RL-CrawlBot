@@ -40,7 +40,7 @@ private:
 
   const int SERVO_DOWN_MIN_ANGLE = 0;
   const int SERVO_DOWN_MAX_ANGLE = 80;
-  const int SERVO_UP_MIN_ANGLE = 10;
+  const int SERVO_UP_MIN_ANGLE = 20;
   const int SERVO_UP_MAX_ANGLE = 180;
 
   int servoDownAngle;
@@ -49,14 +49,14 @@ private:
   int currentDistance;
 
   // Agent
-  const int ANGLE_STEP = 20;
+  const int ANGLE_STEP = 30;
 
   const int NUM_STATES_DOWN = (SERVO_DOWN_MAX_ANGLE - SERVO_DOWN_MIN_ANGLE) / ANGLE_STEP + 1;
   const int NUM_STATES_UP = (SERVO_UP_MAX_ANGLE - SERVO_UP_MIN_ANGLE) / ANGLE_STEP + 1;
   const int TOTAL_STATES = NUM_STATES_DOWN * NUM_STATES_UP;
 
   const int NUM_ACTION_STEPS = 3;
-  const int ACTION_MULTIPLIERS[5] = { -4, -3, 0, 3, 4 };
+  const int ACTION_MULTIPLIERS[3] = { -1, 0, 1};
   const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS;
 
   vector<vector<float>> qTable{ TOTAL_STATES, vector<float>(NUM_ACTIONS, 0.0) };
@@ -150,7 +150,7 @@ public:
 
         int action = chooseAction(currentState_idx);
         takeAction(action);
-        delay(100);
+        delay(4);
 
         int final_dist = getDistance();
         if (final_dist < 0)
@@ -324,13 +324,13 @@ public:
   // }
   // Modify the getDistance() function
   int getDistance() {
-    const int num_readings = 5;
+    const int num_readings = 4;
     int readings[num_readings];
     long total = 0;
 
     for (int i = 0; i < num_readings; i++) {
       readings[i] = sonar.ping_cm();
-      delay(20); // Small delay between pings
+      delay(4); // Small delay between pings
     }
 
     // Simple average, ignoring errors (0)
