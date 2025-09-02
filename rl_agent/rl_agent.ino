@@ -93,6 +93,20 @@ public:
 
   // RL Learning methods
 
+    // Print Q-table to Serial
+    void printQTable() {
+      Serial.println("Q-table:");
+      for (int s = 0; s < TOTAL_STATES; ++s) {
+        Serial.print("State ");
+        Serial.print(s);
+        Serial.print(": ");
+        for (int a = 0; a < NUM_ACTIONS; ++a) {
+          Serial.print(qTable[s][a], 2);
+          Serial.print("\t");
+        }
+        Serial.println();
+      }
+    }
   void getActionFromIndex(int actionIndex, int& actionDown_idx, int& actionUp_idx) {
     if (actionIndex >= 4) {
       actionIndex++;
@@ -238,7 +252,8 @@ public:
     }
 
     printOnLCD("Training Complete!");
-    for(int i=0; i<);
+    // Print Q-table after training
+    printQTable();
   }
 
   void doLearnedBehavior() {
