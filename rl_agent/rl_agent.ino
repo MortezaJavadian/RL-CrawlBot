@@ -7,6 +7,9 @@
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 #include <ESPmDNS.h>
+#include <vector>
+
+using namespace std;
 
 // EEPROM settings
 #define EEPROM_SIZE 1     // 1 byte to store robot number (1-8)
@@ -34,10 +37,52 @@ private:
   Servo servoUp;
   NewPing sonar;
   LiquidCrystal_I2C lcd;
+
+  const int SERVO_DOWN_MIN_ANGLE = 0;
+  const int SERVO_DOWN_MAX_ANGLE = 80;
+  const int SERVO_UP_MIN_ANGLE = 20;
+  const int SERVO_UP_MAX_ANGLE = 180;
+
+  const int NUM_SRF_READING = 4;
+
   int servoDownAngle;
   int servoUpAngle;
 
+  int currentDistance;
+
   // Agent
+  const int ANGLE_STEP = 30;
+
+  const int NUM_STATES_DOWN = (SERVO_DOWN_MAX_ANGLE - SERVO_DOWN_MIN_ANGLE) / ANGLE_STEP + 1;
+  const int NUM_STATES_UP = (SERVO_UP_MAX_ANGLE - SERVO_UP_MIN_ANGLE) / ANGLE_STEP + 1;
+  const int TOTAL_STATES = NUM_STATES_DOWN * NUM_STATES_UP;
+
+  const int NUM_ACTION_STEPS = 3;
+  const int ACTION_MULTIPLIERS[3] = { -1, 0, 1 };
+  const int ZERO_ACTION_MULTIPLIERS_IDX = 1;
+  const int ZERO_ZERO_ACTION_IDX = ZERO_ACTION_MULTIPLIERS_IDX * NUM_ACTION_STEPS + ZERO_ACTION_MULTIPLIERS_IDX;
+  const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS - 1;
+
+  vector<vector<float>> qTable{
+    TOTAL_STATES, vector<float>(NUM_ACTIONS, 0.0)
+  };
+
+  float alpha = 0.2;
+  float gamma = 0.9;
+
+  float epsilon_prob = 1;
+  float epsilon_prob_decay = 0.94;
+  float min_epsilon_prob = 0.05;
+
+  float maxDeltaRecord = 0.0;
+  float deltaRecordReward = 3.0;
+
+  float loopReward = -0.3;
+  const int HISTORY_SIZE = 3;
+  vector<int> stateHistory;
+
+  int learning_cycles = 50;
+  int steps_per_cycle = 100;
 
 public:
   // Dynamic network and OTA identifiers
@@ -53,6 +98,183 @@ public:
       servoUpAngle(180),
       robot_number(0),
       otaTaskHandle(NULL) {}
+
+  // RL Learning methods
+
+  void printQTable() {
+    Serial.println("Q-table:");
+    for (int s = 0; s < TOTAL_STATES; ++s) {
+      Serial.print("State ");
+      Serial.print(s);
+      Serial.print(": ");
+      for (int a = 0; a < NUM_ACTIONS; ++a) {
+        Serial.print(qTable[s][a], 2);
+        Serial.print("\t");
+      }
+      Serial.println();
+    }
+  }
+
+  void getActionFromIndex(int actionIndex, int &actionDown_idx, int &actionUp_idx) {
+    if (actionIndex >= ZERO_ZERO_ACTION_IDX) {
+      actionIndex++;
+    }
+    actionDown_idx = actionIndex / NUM_ACTION_STEPS;
+    actionUp_idx = actionIndex % NUM_ACTION_STEPS;
+  }
+
+  int getStateIndex() {
+    int down_step = (servoDownAngle - SERVO_DOWN_MIN_ANGLE) / ANGLE_STEP;
+    int up_step = (servoUpAngle - SERVO_UP_MIN_ANGLE) / ANGLE_STEP;
+    return down_step * NUM_STATES_UP + up_step;
+  }
+
+  int getBestAction(int stateIndex) {
+    int bestAction = 0;
+    float maxQ = -1e9;
+    for (int i = 0; i < NUM_ACTIONS; ++i) {
+      if (qTable[stateIndex][i] > maxQ) {
+        maxQ = qTable[stateIndex][i];
+        bestAction = i;
+      }
+    }
+    return bestAction;
+  }
+
+  int chooseAction(int stateIndex) {
+    if (((float)random(100) / 100.0) < epsilon_prob) {
+      Serial.print("Random: ");
+      return random(NUM_ACTIONS);
+    } else {
+      Serial.print("Best: ");
+      return getBestAction(stateIndex);
+    }
+  }
+
+  void takeAction(int actionIndex) {
+    int actionDown_idx, actionUp_idx;
+    getActionFromIndex(actionIndex, actionDown_idx, actionUp_idx);
+
+    int deltaDown = ACTION_MULTIPLIERS[actionDown_idx] * ANGLE_STEP;
+    int deltaUp = ACTION_MULTIPLIERS[actionUp_idx] * ANGLE_STEP;
+
+    int targetDown = servoDownAngle + deltaDown;
+    int targetUp = servoUpAngle + deltaUp;
+
+    moveServos(targetDown, targetUp);
+    delay(4);
+  }
+
+  float getReward(int final_dist) {
+    int currentState = getStateIndex();
+    float penalty = 0;
+    float deltaRecordBonus = 0;
+
+    for (int i = 0; i < stateHistory.size(); i++) {
+      if (stateHistory[i] == currentState) {
+        penalty = loopReward;
+        break;
+      }
+    }
+    stateHistory.push_back(currentState);
+    if (stateHistory.size() > HISTORY_SIZE) {
+      stateHistory.erase(stateHistory.begin());
+    }
+
+    float currentDelta = (float)(final_dist - currentDistance);
+
+    if (currentDelta > maxDeltaRecord) {
+      maxDeltaRecord = currentDelta;
+      deltaRecordBonus = deltaRecordReward;
+
+      Serial.print("New Delta Record! Delta: ");
+      Serial.print(currentDelta);
+      Serial.print(" cm, Bonus Reward: ");
+      Serial.println(deltaRecordBonus);
+    }
+
+    float reward = currentDelta + penalty + deltaRecordBonus;
+    Serial.print("reward: ");
+    Serial.print(reward);
+    Serial.println();
+    return reward;
+  }
+
+  void doTraining() {
+    printOnLCD("Training Started...");
+
+    for (int c = 0; c < learning_cycles; ++c) {
+      lcd.clear();
+      lcd.print("Cycle: ");
+      lcd.print(c + 1);
+      lcd.print("/");
+      lcd.print(learning_cycles);
+      Serial.printf("Cycle %d\n", c + 1);
+
+      float total_reward = 0;
+      currentDistance = getDistance(true);
+
+      for (int step = 0; step < steps_per_cycle; ++step) {
+        int currentState_idx = getStateIndex();
+
+        int action = chooseAction(currentState_idx);
+        takeAction(action);
+
+        int final_dist = getDistance(false);
+        if (final_dist < 0)
+          final_dist = currentDistance;
+
+        float reward = getReward(final_dist);
+
+        total_reward += reward;
+        currentDistance = final_dist;
+
+        int nextState = getStateIndex();
+
+        float old_q = qTable[currentState_idx][action];
+        float next_max_q = qTable[nextState][getBestAction(nextState)];
+
+        float new_q = old_q + alpha * (reward + gamma * next_max_q - old_q);
+        qTable[currentState_idx][action] = new_q;
+
+        if (step % 20 == 0) {
+          lcd.setCursor(0, 1);
+          lcd.print("Step: ");
+          lcd.print(step);
+        }
+      }
+
+      if (epsilon_prob > min_epsilon_prob)
+        epsilon_prob *= epsilon_prob_decay;
+      else
+        epsilon_prob = min_epsilon_prob;
+
+      lcd.clear();
+      lcd.print("Total Reward: ");
+      lcd.setCursor(0, 1);
+      lcd.print(total_reward);
+      Serial.printf("Total Reward: %.2f\n", total_reward);
+      Serial.printf("Current Delta Record: %.2f cm\n", maxDeltaRecord);
+      delay(3000);
+    }
+
+    printOnLCD("Training Complete!");
+    printQTable();
+  }
+
+  void doLearnedBehavior() {
+    printOnLCD("Learned Behavior...");
+
+    while (true) {
+      int currentState_idx = getStateIndex();
+      int action = getBestAction(currentState_idx);
+
+      Serial.printf("State: %d, Action: %d\n", currentState_idx, action);
+      takeAction(action);
+    }
+  }
+
+  // Setup and Hardware methods
 
   void saveRobotNumber(uint8_t number) {
     EEPROM.write(ROBOT_NUM_ADDR, number);
@@ -159,20 +381,40 @@ public:
     lcd.clear();
     lcd.print(message);
     delay(2000);
-    lcd.clear();
   }
 
-  int getDistance() {
-    int distance = sonar.ping_cm();  // Get distance in cm
+  int getDistance(bool is_new_cycle) {
+    int readings[NUM_SRF_READING];
+    long total = 0;
 
-    if (distance == 0) {
+    for (int i = 0; i < NUM_SRF_READING; i++) {
+      int reading = sonar.ping_cm();
+      if (abs(reading - currentDistance) > 25 && currentDistance != 0 && !is_new_cycle) {
+        readings[i] = currentDistance;
+      } else {
+        readings[i] = reading;
+      }
+      delay(4);
+    }
+
+    int count = 0;
+    for (int i = 0; i < NUM_SRF_READING; i++) {
+      if (readings[i] > 0) {
+        total += readings[i];
+        count++;
+      }
+    }
+
+    if (count == 0) {
       Serial.println("Warning: No echo received from SRF module.");
       return -1;
     }
 
-    Serial.print("Distance: ");
+    int distance = total / count;
+
+    Serial.print("Avg Distance: ");
     Serial.print(distance);
-    Serial.println(" cm");
+    Serial.print(" cm");
 
     return distance;
   }
@@ -191,9 +433,9 @@ public:
     delay(1000);
   }
 
-  void moveServos(int targetDown, int targetUp, int stepDelay = 7, int stepSize = 2) {
-    targetDown = constrain(targetDown, 0, 90);
-    targetUp = constrain(targetUp, 0, 180);
+  void moveServos(int targetDown, int targetUp, int stepDelay = 10, int stepSize = 2) {
+    targetDown = constrain(targetDown, SERVO_DOWN_MIN_ANGLE, SERVO_DOWN_MAX_ANGLE);
+    targetUp = constrain(targetUp, SERVO_UP_MIN_ANGLE, SERVO_UP_MAX_ANGLE);
 
     int deltaDown = targetDown - servoDownAngle;
     int deltaUp = targetUp - servoUpAngle;
@@ -208,7 +450,7 @@ public:
     for (int i = 1; i <= totalSteps; i++) {
       if (i <= stepsDown) {
         int newDown = servoDownAngle + (deltaDown > 0 ? i * stepSize : -i * stepSize);
-        servoDown.write(constrain(newDown, 0, 90));
+        servoDown.write(constrain(newDown, SERVO_DOWN_MIN_ANGLE, SERVO_DOWN_MAX_ANGLE));
       } else if (!downDone) {
         servoDown.write(targetDown);
         downDone = true;
@@ -216,7 +458,7 @@ public:
 
       if (i <= stepsUp) {
         int newUp = servoUpAngle + (deltaUp > 0 ? i * stepSize : -i * stepSize);
-        servoUp.write(constrain(newUp, 0, 180));
+        servoUp.write(constrain(newUp, SERVO_UP_MIN_ANGLE, SERVO_UP_MAX_ANGLE));
       } else if (!upDone) {
         servoUp.write(targetUp);
         upDone = true;
@@ -234,7 +476,7 @@ public:
     printOnLCD("Health Check Start");
 
     // 2. Get distance and print it
-    int dist = getDistance();
+    int dist = getDistance(true);
     printDistance(dist);
 
     // 3. Move servos to check
@@ -247,14 +489,6 @@ public:
 
     // 5. Print completion message
     printOnLCD("Health Check Done");
-  }
-
-  void doTraining() {
-    // TODO: Add your training logic here
-  }
-
-  void doLearnedBehavior() {
-    // TODO: Add your learned behavior logic here
   }
 };
 
@@ -300,8 +534,6 @@ void setup() {
 }
 
 void loop() {
-  robot.printOnLCD("Main Loop Running");
-  int dist = robot.getDistance();
-  robot.printDistance(dist);
-  // TODO: Implement your main loop logic here
+  robot.doTraining();
+  robot.doLearnedBehavior();
 }
