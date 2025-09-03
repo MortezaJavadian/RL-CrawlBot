@@ -43,6 +43,8 @@ private:
   const int SERVO_UP_MIN_ANGLE = 20;
   const int SERVO_UP_MAX_ANGLE = 180;
 
+  const int NUM_SRF_READING = 4;
+
   int servoDownAngle;
   int servoUpAngle;
 
@@ -56,24 +58,30 @@ private:
   const int TOTAL_STATES = NUM_STATES_DOWN * NUM_STATES_UP;
 
   const int NUM_ACTION_STEPS = 3;
-  const int ACTION_MULTIPLIERS[3] = { -1, 0, 1}; 
-  const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS - 1;  // Remove (0,0) action
+  const int ACTION_MULTIPLIERS[3] = { -1, 0, 1 };
+  const int ZERO_ACTION_MULTIPLIERS_IDX = 1;
+  const int ZERO_ZERO_ACTION_IDX = ZERO_ACTION_MULTIPLIERS_IDX * NUM_ACTION_STEPS + ZERO_ACTION_MULTIPLIERS_IDX;
+  const int NUM_ACTIONS = NUM_ACTION_STEPS * NUM_ACTION_STEPS - 1;
 
-  vector<vector<float>> qTable{ TOTAL_STATES, vector<float>(NUM_ACTIONS, 0.0) };
-  
-  const int HISTORY_SIZE = 3;
-  vector<int> stateHistory;
-  
-  float maxDeltaRecord = 0.0;
-  float deltaRecordReward = 3.0;
+  vector<vector<float>> qTable{
+    TOTAL_STATES, vector<float>(NUM_ACTIONS, 0.0)
+  };
 
   float alpha = 0.2;
   float gamma = 0.9;
+
   float epsilon_prob = 1;
   float epsilon_prob_decay = 0.94;
-  float min_epsilon_prob = 0.1;
+  float min_epsilon_prob = 0.05;
 
-  int learning_cycles = 40;
+  float maxDeltaRecord = 0.0;
+  float deltaRecordReward = 3.0;
+
+  float loopReward = -0.3;
+  const int HISTORY_SIZE = 3;
+  vector<int> stateHistory;
+
+  int learning_cycles = 50;
   int steps_per_cycle = 100;
 
 public:
@@ -93,22 +101,22 @@ public:
 
   // RL Learning methods
 
-    // Print Q-table to Serial
-    void printQTable() {
-      Serial.println("Q-table:");
-      for (int s = 0; s < TOTAL_STATES; ++s) {
-        Serial.print("State ");
-        Serial.print(s);
-        Serial.print(": ");
-        for (int a = 0; a < NUM_ACTIONS; ++a) {
-          Serial.print(qTable[s][a], 2);
-          Serial.print("\t");
-        }
-        Serial.println();
+  void printQTable() {
+    Serial.println("Q-table:");
+    for (int s = 0; s < TOTAL_STATES; ++s) {
+      Serial.print("State ");
+      Serial.print(s);
+      Serial.print(": ");
+      for (int a = 0; a < NUM_ACTIONS; ++a) {
+        Serial.print(qTable[s][a], 2);
+        Serial.print("\t");
       }
+      Serial.println();
     }
-  void getActionFromIndex(int actionIndex, int& actionDown_idx, int& actionUp_idx) {
-    if (actionIndex >= 4) {
+  }
+
+  void getActionFromIndex(int actionIndex, int &actionDown_idx, int &actionUp_idx) {
+    if (actionIndex >= ZERO_ZERO_ACTION_IDX) {
       actionIndex++;
     }
     actionDown_idx = actionIndex / NUM_ACTION_STEPS;
@@ -135,9 +143,10 @@ public:
 
   int chooseAction(int stateIndex) {
     if (((float)random(100) / 100.0) < epsilon_prob) {
-      Serial.print("randooooom");
+      Serial.print("Random: ");
       return random(NUM_ACTIONS);
     } else {
+      Serial.print("Best: ");
       return getBestAction(stateIndex);
     }
   }
@@ -153,40 +162,37 @@ public:
     int targetUp = servoUpAngle + deltaUp;
 
     moveServos(targetDown, targetUp);
+    delay(4);
   }
 
   float getReward(int final_dist) {
     int currentState = getStateIndex();
     float penalty = 0;
     float deltaRecordBonus = 0;
-    
+
     for (int i = 0; i < stateHistory.size(); i++) {
       if (stateHistory[i] == currentState) {
-        penalty = -0.3;
+        penalty = loopReward;
         break;
       }
     }
-    
     stateHistory.push_back(currentState);
     if (stateHistory.size() > HISTORY_SIZE) {
       stateHistory.erase(stateHistory.begin());
     }
-    
-    // Calculate distance change (delta)
+
     float currentDelta = (float)(final_dist - currentDistance);
-    
-    // Check if this delta breaks the record
+
     if (currentDelta > maxDeltaRecord) {
       maxDeltaRecord = currentDelta;
       deltaRecordBonus = deltaRecordReward;
-      
-      // Log the new record
+
       Serial.print("New Delta Record! Delta: ");
       Serial.print(currentDelta);
       Serial.print(" cm, Bonus Reward: ");
       Serial.println(deltaRecordBonus);
     }
-    
+
     float reward = currentDelta + penalty + deltaRecordBonus;
     Serial.print("reward: ");
     Serial.print(reward);
@@ -213,7 +219,6 @@ public:
 
         int action = chooseAction(currentState_idx);
         takeAction(action);
-        delay(4);
 
         int final_dist = getDistance(false);
         if (final_dist < 0)
@@ -241,6 +246,8 @@ public:
 
       if (epsilon_prob > min_epsilon_prob)
         epsilon_prob *= epsilon_prob_decay;
+      else
+        epsilon_prob = min_epsilon_prob;
 
       lcd.clear();
       lcd.print("Total Reward: ");
@@ -252,23 +259,20 @@ public:
     }
 
     printOnLCD("Training Complete!");
-    // Print Q-table after training
     printQTable();
   }
 
   void doLearnedBehavior() {
-  printOnLCD("Running Learned Behavior...");
-  const float exploration_rate = 0.1;
+    printOnLCD("Learned Behavior...");
 
-  while (true) {
-    int currentState_idx = getStateIndex();
-    int action = chooseAction(currentState_idx);
-    
-    Serial.printf("State: %d, Action: %d\n", currentState_idx, action);
-    takeAction(action);
-    delay(4);
+    while (true) {
+      int currentState_idx = getStateIndex();
+      int action = getBestAction(currentState_idx);
+
+      Serial.printf("State: %d, Action: %d\n", currentState_idx, action);
+      takeAction(action);
+    }
   }
-}
 
   // Setup and Hardware methods
 
@@ -379,31 +383,22 @@ public:
     delay(2000);
   }
 
-  void setupDeltaRecord() {
-    maxDeltaRecord = 0.0;
-    Serial.println("Delta record system initialized");
-    printOnLCD("Delta System Ready");
-  }
-
   int getDistance(bool is_new_cycle) {
-    const int num_readings = 4;
-    int readings[num_readings];
+    int readings[NUM_SRF_READING];
     long total = 0;
 
-    for (int i = 0; i < num_readings; i++) {
+    for (int i = 0; i < NUM_SRF_READING; i++) {
       int reading = sonar.ping_cm();
       if (abs(reading - currentDistance) > 25 && currentDistance != 0 && !is_new_cycle) {
         readings[i] = currentDistance;
-      }
-      else {
+      } else {
         readings[i] = reading;
       }
       delay(4);
     }
 
-    // Simple average, ignoring errors (0)
     int count = 0;
-    for (int i = 0; i < num_readings; i++) {
+    for (int i = 0; i < NUM_SRF_READING; i++) {
       if (readings[i] > 0) {
         total += readings[i];
         count++;
@@ -532,9 +527,6 @@ void setup() {
 
   robot.setupServos();
 
-  // Setup delta record system
-  robot.setupDeltaRecord();
-
   // Notify setup completion
   robot.printOnLCD("Setup Completed");
 
@@ -542,7 +534,6 @@ void setup() {
 }
 
 void loop() {
-  vTaskDelay(1);
   robot.doTraining();
   robot.doLearnedBehavior();
 }
